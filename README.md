@@ -9,6 +9,7 @@ Public repo: https://github.com/maher943/SOC-Monotoring
 | Path | Purpose |
 |------|---------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How each product is installed, node placement, networking, integration plan |
+| [docs/UI-WALKTHROUGH.md](docs/UI-WALKTHROUGH.md) | **Where to look** in TheHive / Shuffle / Wazuh UIs |
 | [docs/PROGRESS.md](docs/PROGRESS.md) | Step-by-step log of what we changed and verified |
 | [CREDENTIALS.example.txt](CREDENTIALS.example.txt) | Template for local secrets (copy to `CREDENTIALS.txt`, never commit) |
 | `wazuh/` | Integrator scripts + ConfigMap snippet |
@@ -42,3 +43,5 @@ cp CREDENTIALS.example.txt CREDENTIALS.txt   # fill locally
 Flow: **Wazuh alert → integrator builds TheHive case JSON → Shuffle `$exec` → TheHive case**.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture.
+
+**New here?** Start with [docs/UI-WALKTHROUGH.md](docs/UI-WALKTHROUGH.md) — where to click in TheHive / Shuffle / Wazuh.
