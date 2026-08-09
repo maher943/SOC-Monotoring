@@ -1,16 +1,21 @@
 # Shuffle workflow — Wazuh Alerts
 
-Tracked metadata for the workflow that receives Wazuh integrator POSTs and opens TheHive cases.
-
 | Field | Value |
 |-------|--------|
 | Name | Wazuh Alerts |
 | Workflow UUID | `7c3ff717-660d-49a5-8751-b6b06f25cb1b` |
 | Webhook UUID | `bab61144-db82-4ada-aacb-62fa34893206` |
-| Trigger | Webhook (JSON body = full Wazuh alert) |
+| Trigger | Webhook |
 | Action | HTTP POST → TheHive `/api/v1/case` |
+| HTTP body | **`$exec`** (entire webhook JSON = TheHive case object) |
 | TheHive org header | `X-Organisation: SOC` |
-| Auth | API key for `shuffle@soc.local` (see `../CREDENTIALS.txt`) |
+| Auth | API key for `shuffle@soc.local` (local `CREDENTIALS.txt` only) |
+
+## Why body is `$exec`
+
+Shuffle does not expand nested Wazuh fields. The Wazuh integrator
+(`wazuh/scripts/custom-shuffle.py`) pre-builds the TheHive case JSON;
+Shuffle only forwards it.
 
 ## URLs
 
@@ -18,12 +23,12 @@ Tracked metadata for the workflow that receives Wazuh integrator POSTs and opens
 # From Wazuh manager (preferred)
 http://shuffle-backend.shuffle.svc.cluster.local:5001/api/v1/hooks/webhook_bab61144-db82-4ada-aacb-62fa34893206
 
-# From laptop / LAN smoke test
+# LAN smoke test
 http://192.168.1.125:30080/api/v1/hooks/webhook_bab61144-db82-4ada-aacb-62fa34893206
 ```
 
-## Notes
+## Export in this repo
 
-- Shuffle workflow branches must be stored as a **JSON array** of edge objects (a map caused PUT 400 when editing via API).
-- Prefer editing the workflow in the Shuffle UI; when stable, export JSON here for Git history.
-- Wazuh snippet that points at this webhook: `../wazuh/config/integration-shuffle.snippet.xml`
+Redacted workflow dump (no live API keys / images trimmed):
+
+`shuffle/workflows/wazuh-alerts.redacted.json`

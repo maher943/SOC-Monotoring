@@ -1,0 +1,140 @@
+apiVersion: v1
+data:
+  custom-shuffle: |
+    #!/bin/sh
+    # Wazuh integrator wrapper — required name prefix: custom-*
+    # Called by wazuh-integratord as:
+    #   custom-shuffle <alert_file> <api_key> <hook_url> [options_file]
+    #
+    # This thin shell wrapper launches the Python sender next to it.
+
+    WPYTHON_BIN="framework/python/bin/python3"
+    DIR_NAME="$(dirname "$(readlink -f "$0")")"
+    cd /var/ossec || exit 1
+    exec ${WPYTHON_BIN} "${DIR_NAME}/custom-shuffle.py" "$@"
+  custom-shuffle.py: |
+    #!/usr/bin/env python3
+    """Send a Wazuh JSON alert to a Shuffle webhook.
+
+    Wazuh integrator invokes this with:
+      argv[1] = path to alert JSON file
+      argv[2] = api_key (unused for Shuffle webhook; Wazuh always passes it)
+      argv[3] = hook_url from <hook_url> in ossec.conf
+
+    Why the payload is TheHive-shaped
+    ---------------------------------
+    Shuffle exposes the webhook POST body only as $exec (a JSON string). Nested
+    paths like $rule.level are NOT expanded. The Shuffle HTTP action body is
+    literally `$exec`, so this script builds the TheHive /api/v1/case JSON and
+    Shuffle forwards it unchanged to TheHive.
+    """
+    from __future__ import print_function
+
+    import json
+    import sys
+
+    try:
+        from urllib import request as urllib_request
+    except ImportError:
+        import urllib2 as urllib_request  # type: ignore
+
+
+    def build_thehive_case(alert):
+        rule = alert.get("rule") or {}
+        agent = alert.get("agent") or {}
+        rule_id = str(rule.get("id", ""))
+        rule_level = str(rule.get("level", ""))
+        rule_description = rule.get("description", "") or "Wazuh alert"
+        rule_groups = ",".join(rule.get("groups") or [])
+        agent_id = str(agent.get("id", ""))
+        agent_name = agent.get("name", "") or ""
+        location = alert.get("location", "") or ""
+        full_log = alert.get("full_log", "") or ""
+        raw_json = json.dumps(alert, indent=2)
+
+        title = "Wazuh [%s] %s" % (rule_level, rule_description)
+        description = "\n".join(
+            [
+                "Automated from Wazuh via Shuffle.",
+                "",
+                "**Rule ID:** %s" % rule_id,
+                "**Level:** %s" % rule_level,
+                "**Groups:** %s" % rule_groups,
+                "**Agent:** %s (%s)" % (agent_name, agent_id),
+                "**Location:** %s" % location,
+                "",
+                "**Full log:**",
+                "```",
+                full_log,
+                "```",
+                "",
+                "**Raw event:**",
+                "```json",
+                raw_json,
+                "```",
+            ]
+        )
+
+        # Severity: map Wazuh level (0-15) roughly onto TheHive 1-4
+        try:
+            level_i = int(rule_level)
+        except Exception:
+            level_i = 5
+        if level_i >= 12:
+            severity = 4
+        elif level_i >= 10:
+            severity = 3
+        elif level_i >= 7:
+            severity = 2
+        else:
+            severity = 1
+
+        return {
+            "title": title,
+            "description": description,
+            "severity": severity,
+            "tags": ["wazuh", "shuffle", "auto", "level-%s" % rule_level],
+            "tlp": 2,
+            "pap": 2,
+        }
+
+
+    def main():
+        if len(sys.argv) < 4:
+            sys.stderr.write(
+                "usage: custom-shuffle.py <alert_file> <api_key> <hook_url>\n"
+            )
+            return 1
+
+        alert_file = sys.argv[1]
+        hook_url = sys.argv[3]
+
+        with open(alert_file) as f:
+            alert = json.load(f)
+
+        data = json.dumps(build_thehive_case(alert)).encode("utf-8")
+        req = urllib_request.Request(
+            hook_url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib_request.urlopen(req, timeout=10)
+        except Exception as exc:
+            sys.stderr.write("custom-shuffle error: %s\n" % exc)
+            return 1
+        return 0
+
+
+    if __name__ == "__main__":
+        sys.exit(main())
+kind: ConfigMap
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"v1","data":{"custom-shuffle":"#!/bin/sh\n# Wazuh integrator wrapper — required name prefix: custom-*\n# Called by wazuh-integratord as:\n#   custom-shuffle \u003calert_file\u003e \u003capi_key\u003e \u003chook_url\u003e [options_file]\n#\n# This thin shell wrapper launches the Python sender next to it.\n\nWPYTHON_BIN=\"framework/python/bin/python3\"\nDIR_NAME=\"$(dirname \"$(readlink -f \"$0\")\")\"\ncd /var/ossec || exit 1\nexec ${WPYTHON_BIN} \"${DIR_NAME}/custom-shuffle.py\" \"$@\"\n","custom-shuffle.py":"#!/usr/bin/env python3\n\"\"\"Send a Wazuh JSON alert to a Shuffle webhook.\n\nWazuh integrator invokes this with:\n  argv[1] = path to alert JSON file\n  argv[2] = api_key (unused for Shuffle webhook; Wazuh always passes it)\n  argv[3] = hook_url from \u003chook_url\u003e in ossec.conf\n\nWhy the payload is TheHive-shaped\n---------------------------------\nShuffle exposes the webhook POST body only as $exec (a JSON string). Nested\npaths like $rule.level are NOT expanded. The Shuffle HTTP action body is\nliterally `$exec`, so this script builds the TheHive /api/v1/case JSON and\nShuffle forwards it unchanged to TheHive.\n\"\"\"\nfrom __future__ import print_function\n\nimport json\nimport sys\n\ntry:\n    from urllib import request as urllib_request\nexcept ImportError:\n    import urllib2 as urllib_request  # type: ignore\n\n\ndef build_thehive_case(alert):\n    rule = alert.get(\"rule\") or {}\n    agent = alert.get(\"agent\") or {}\n    rule_id = str(rule.get(\"id\", \"\"))\n    rule_level = str(rule.get(\"level\", \"\"))\n    rule_description = rule.get(\"description\", \"\") or \"Wazuh alert\"\n    rule_groups = \",\".join(rule.get(\"groups\") or [])\n    agent_id = str(agent.get(\"id\", \"\"))\n    agent_name = agent.get(\"name\", \"\") or \"\"\n    location = alert.get(\"location\", \"\") or \"\"\n    full_log = alert.get(\"full_log\", \"\") or \"\"\n    raw_json = json.dumps(alert, indent=2)\n\n    title = \"Wazuh [%s] %s\" % (rule_level, rule_description)\n    description = \"\\n\".join(\n        [\n            \"Automated from Wazuh via Shuffle.\",\n            \"\",\n            \"**Rule ID:** %s\" % rule_id,\n            \"**Level:** %s\" % rule_level,\n            \"**Groups:** %s\" % rule_groups,\n            \"**Agent:** %s (%s)\" % (agent_name, agent_id),\n            \"**Location:** %s\" % location,\n            \"\",\n            \"**Full log:**\",\n            \"```\",\n            full_log,\n            \"```\",\n            \"\",\n            \"**Raw event:**\",\n            \"```json\",\n            raw_json,\n            \"```\",\n        ]\n    )\n\n    # Severity: map Wazuh level (0-15) roughly onto TheHive 1-4\n    try:\n        level_i = int(rule_level)\n    except Exception:\n        level_i = 5\n    if level_i \u003e= 12:\n        severity = 4\n    elif level_i \u003e= 10:\n        severity = 3\n    elif level_i \u003e= 7:\n        severity = 2\n    else:\n        severity = 1\n\n    return {\n        \"title\": title,\n        \"description\": description,\n        \"severity\": severity,\n        \"tags\": [\"wazuh\", \"shuffle\", \"auto\", \"level-%s\" % rule_level],\n        \"tlp\": 2,\n        \"pap\": 2,\n    }\n\n\ndef main():\n    if len(sys.argv) \u003c 4:\n        sys.stderr.write(\n            \"usage: custom-shuffle.py \u003calert_file\u003e \u003capi_key\u003e \u003chook_url\u003e\\n\"\n        )\n        return 1\n\n    alert_file = sys.argv[1]\n    hook_url = sys.argv[3]\n\n    with open(alert_file) as f:\n        alert = json.load(f)\n\n    data = json.dumps(build_thehive_case(alert)).encode(\"utf-8\")\n    req = urllib_request.Request(\n        hook_url,\n        data=data,\n        headers={\"Content-Type\": \"application/json\"},\n    )\n    try:\n        urllib_request.urlopen(req, timeout=10)\n    except Exception as exc:\n        sys.stderr.write(\"custom-shuffle error: %s\\n\" % exc)\n        return 1\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n"},"kind":"ConfigMap","metadata":{"annotations":{},"labels":{"app.kubernetes.io/name":"wazuh","soc-stack.integrations":"shuffle"},"name":"wazuh-custom-shuffle","namespace":"wazuh"}}
+  labels:
+    app.kubernetes.io/name: wazuh
+    soc-stack.integrations: shuffle
+  name: wazuh-custom-shuffle
+  namespace: wazuh

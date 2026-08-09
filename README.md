@@ -9,10 +9,11 @@ Public repo: https://github.com/maher943/SOC-Monotoring
 | Path | Purpose |
 |------|---------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How each product is installed, node placement, networking, integration plan |
+| [docs/PROGRESS.md](docs/PROGRESS.md) | Step-by-step log of what we changed and verified |
 | [CREDENTIALS.example.txt](CREDENTIALS.example.txt) | Template for local secrets (copy to `CREDENTIALS.txt`, never commit) |
 | `wazuh/` | Integrator scripts + ConfigMap snippet |
 | `thehive/` | Helm values (secrets redacted) + NodePort manifest |
-| `shuffle/` | Helm values + workflow metadata |
+| `shuffle/` | Helm values + workflow metadata + redacted workflow JSON |
 | `scripts/` | Apply / reload / verify helpers |
 
 Upstream charts/repos are **not** fully vendored here (keep them separate):
@@ -31,11 +32,13 @@ cp CREDENTIALS.example.txt CREDENTIALS.txt   # fill locally
 ## Apply Wazuh → Shuffle link
 
 ```bash
-./scripts/install-integration-scripts.sh
-./scripts/patch-wazuh-configmap.sh            # dry-run
+./scripts/apply-scripts-configmap.sh          # ConfigMap + copy scripts to manager
+./scripts/patch-wazuh-configmap.sh            # dry-run ossec <integration>
 ./scripts/patch-wazuh-configmap.sh --apply
 ./scripts/reload-wazuh-manager.sh --merge-integration
 ./scripts/verify-integration.sh
 ```
+
+Flow: **Wazuh alert → integrator builds TheHive case JSON → Shuffle `$exec` → TheHive case**.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture.

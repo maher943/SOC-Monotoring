@@ -87,9 +87,11 @@ LAN access for UIs/NodePorts is typically via **`192.168.1.125`** (master). The 
 
 1. Wazuh raises an alert (rule level ≥ **7**).  
 2. Manager **integrator** runs `custom-shuffle` / `custom-shuffle.py`.  
-3. Script POSTs the full JSON alert to a **Shuffle webhook**.  
-4. Shuffle workflow **Wazuh Alerts** maps fields and POSTs a **case** to TheHive.  
+3. Script builds a **TheHive case JSON** (title/description/severity/tags) and POSTs it to the **Shuffle webhook**.  
+4. Shuffle workflow **Wazuh Alerts** forwards the body as **`$exec`** to TheHive `POST /api/v1/case`.  
 5. Analysts work the case in TheHive (org SOC); later enrich with Shuffle apps / Wazuh API as needed.
+
+> **Shuffle variable caveat:** only `$exec` (whole webhook body string) substitutes reliably. Nested paths like `$rule.level` stay empty — that is why the integrator pre-builds the case.
 
 ### Current Shuffle workflow
 
@@ -119,12 +121,14 @@ TheHive auth on the HTTP action: Bearer / API key for `shuffle@soc.local`, heade
 | Artifact | Location |
 |----------|----------|
 | Shell wrapper | `wazuh/scripts/custom-shuffle` |
-| Python sender | `wazuh/scripts/custom-shuffle.py` |
+| Python sender (builds TheHive case JSON) | `wazuh/scripts/custom-shuffle.py` |
 | Conf snippet | `wazuh/config/integration-shuffle.snippet.xml` |
+| Scripts ConfigMap apply | `scripts/apply-scripts-configmap.sh` → CM `wazuh-custom-shuffle` |
 | Install scripts onto PVC | `scripts/install-integration-scripts.sh` |
 | Patch ConfigMap idempotently | `scripts/patch-wazuh-configmap.sh` |
 | Safe live merge / reload | `scripts/reload-wazuh-manager.sh` |
 | Verify | `scripts/verify-integration.sh` |
+| Redacted workflow export | `shuffle/workflows/wazuh-alerts.redacted.json` |
 
 Wazuh requires integrator names prefixed with **`custom-`**. Scripts must live under `/var/ossec/integrations/` on the **manager master** with mode `750`, owner `root:wazuh`.
 
@@ -179,8 +183,8 @@ To change TheHive case mapping: edit the Shuffle workflow in the UI (workflow id
 - Tune `level` / `rule_id` / `group` filters so only actionable alerts become cases.
 - Add Shuffle branches: enrich from Wazuh API, attach observables, optional auto-close for noise.
 - Optionally set Shuffle `baseUrl` to a VPN IP if operators always access via OpenVPN.
-- Persist integrator scripts via a small init container or ConfigMap+emptyDir copy job so PVC/subPath quirks cannot drop them.
-- Export the Shuffle workflow JSON into `shuffle/workflows/` once stable (API dump) for full Git traceability of the automation graph.
+- Mount ConfigMap `wazuh-custom-shuffle` into the manager STS (subPath) so a PVC wipe cannot drop scripts without re-apply.
+- See also [PROGRESS.md](PROGRESS.md) for completed steps.
 
 ---
 
