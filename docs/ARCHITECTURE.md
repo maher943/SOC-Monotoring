@@ -100,7 +100,7 @@ LAN access for UIs/NodePorts is typically via **`192.168.1.125`** (master). The 
 | Name | Wazuh Alerts |
 | Workflow id | `7c3ff717-660d-49a5-8751-b6b06f25cb1b` |
 | Webhook id | `bab61144-db82-4ada-aacb-62fa34893206` |
-| Steps | Webhook trigger → HTTP → TheHive `POST /api/v1/case` |
+| Steps | Webhook → HTTP POST TheHive (`body: $exec`) |
 
 **In-cluster webhook URL (used by Wazuh):**
 
