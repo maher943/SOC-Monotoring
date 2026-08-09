@@ -1,0 +1,11 @@
+#!/bin/sh
+# Wazuh integrator wrapper — required name prefix: custom-*
+# Called by wazuh-integratord as:
+#   custom-shuffle <alert_file> <api_key> <hook_url> [options_file]
+#
+# This thin shell wrapper launches the Python sender next to it.
+
+WPYTHON_BIN="framework/python/bin/python3"
+DIR_NAME="$(dirname "$(readlink -f "$0")")"
+cd /var/ossec || exit 1
+exec ${WPYTHON_BIN} "${DIR_NAME}/custom-shuffle.py" "$@"

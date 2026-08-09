@@ -1,0 +1,180 @@
+# Shuffle values aligned for this k3s cluster (VMware + OpenVPN flannel).
+# Target node: node1 (verified better than worker — see notes below).
+#
+# Why not worker?
+#   worker: 4 CPU, ~12G free disk (67% used), already hosts wazuh-manager-master
+#   node1:  8 CPU, ~30G free disk (36% used), no app workloads, vm.max_map_count OK
+# Colocate ALL Shuffle pods on one node to avoid VPN hairpin latency
+# (same failure mode that previously blocked TheHive across nodes).
+
+global:
+  defaultStorageClass: local-path
+  # bitnamilegacy/* images used by the bundled OpenSearch chart
+  security:
+    allowInsecureImages: true
+
+shuffle:
+  # Reachable via Traefik; add "shuffle.local" to /etc/hosts -> 192.168.1.125
+  baseUrl: "http://192.168.1.125:30080"
+  org: Shuffle
+  timezone: Europe/Paris
+
+backend:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 768Mi
+  nodeSelector:
+    kubernetes.io/hostname: node1
+  # Keep probes soft — first app download / OpenSearch init can be slow on lab VMs
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 60
+    successThreshold: 1
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 6
+    successThreshold: 1
+  openSearch:
+    url: "http://{{ .Release.Name }}-opensearch:9200"
+    username: admin
+    skipSSLVerify: true
+  extraEnvVarsSecret: shuffle-backend-env
+
+frontend:
+  replicaCount: 1
+  resourcesPreset: "nano"
+  nodeSelector:
+    kubernetes.io/hostname: node1
+
+orborus:
+  replicaCount: 1
+  resourcesPreset: "nano"
+  nodeSelector:
+    kubernetes.io/hostname: node1
+  # Soft concurrency for a 6–8 GiB lab node
+  executionConcurrency: 5
+  # Workers are deployed by Helm (with nodeSelector), not dynamically by Orborus
+  manageWorkerDeployments: false
+
+worker:
+  enableHelmDeployment: true
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector:
+    kubernetes.io/hostname: node1
+
+app:
+  replicaCount: 1
+  resourcesPreset: "nano"
+  nodeSelector:
+    kubernetes.io/hostname: node1
+
+# Pre-deploy core apps via Helm so workflows don't hit cold-start failures
+apps:
+  enabled: true
+  shuffleTools:
+    enabled: true
+  shuffleSubflow:
+    enabled: true
+  http:
+    enabled: true
+
+persistence:
+  enabled: true
+  apps:
+    storageClass: local-path
+    size: 3Gi
+  appBuilder:
+    storageClass: local-path
+    size: 3Gi
+  files:
+    storageClass: local-path
+    size: 3Gi
+
+ingress:
+  enabled: false
+  # Chart's ingress template is incompatible with bundled common-2.41 helpers.
+  # Use the NodePort service below instead (port 30080).
+  ingressClassName: traefik
+  hostname: shuffle.local
+  path: /
+  backendPath: /api/
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+
+# Single-node OpenSearch (master also holds data). Defaults would schedule
+# master+data with "medium" presets (~2 GiB requests) and risk Pending/OOM.
+opensearch:
+  enabled: true
+  global:
+    security:
+      allowInsecureImages: true
+  sysctlImage:
+    enabled: false # hosts already have vm.max_map_count=1048576
+  security:
+    enabled: false
+  master:
+    masterOnly: false
+    replicaCount: 1
+    heapSize: 512m
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: "1"
+        memory: 1536Mi
+    nodeSelector:
+      kubernetes.io/hostname: node1
+    persistence:
+      enabled: true
+      storageClass: local-path
+      size: 10Gi
+  data:
+    replicaCount: 0
+  coordinating:
+    replicaCount: 0
+  ingest:
+    replicaCount: 0
+  dashboards:
+    enabled: false
+
+# Extra NodePort for LAN access without Host header / DNS
+extraDeploy:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: shuffle-frontend-nodeport
+      namespace: shuffle
+      labels:
+        app.kubernetes.io/name: shuffle
+        app.kubernetes.io/component: frontend
+    spec:
+      type: NodePort
+      ports:
+        - name: http
+          port: 80
+          targetPort: http
+          nodePort: 30080
+          protocol: TCP
+      selector:
+        app.kubernetes.io/name: shuffle
+        app.kubernetes.io/instance: shuffle
+        app.kubernetes.io/component: frontend

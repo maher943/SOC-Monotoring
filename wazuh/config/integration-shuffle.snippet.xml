@@ -1,0 +1,17 @@
+<!--
+  Snippet inserted into Wazuh manager ossec.conf (via ConfigMap master.conf).
+
+  Meaning:
+  - name must start with "custom-" so Wazuh looks for
+    /var/ossec/integrations/custom-shuffle (+ .py)
+  - level 7+ alerts are forwarded (tune as needed)
+  - alert_format json = full alert object (needed by Shuffle $-variables)
+
+  Hook URL is the in-cluster Shuffle backend webhook for workflow "Wazuh Alerts".
+-->
+  <integration>
+    <name>custom-shuffle</name>
+    <hook_url>http://shuffle-backend.shuffle.svc.cluster.local:5001/api/v1/hooks/webhook_bab61144-db82-4ada-aacb-62fa34893206</hook_url>
+    <level>7</level>
+    <alert_format>json</alert_format>
+  </integration>

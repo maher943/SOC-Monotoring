@@ -1,0 +1,23 @@
+# Secrets — never commit
+CREDENTIALS.txt
+**/CREDENTIALS.txt
+*.pem
+*.key
+.env
+.env.*
+
+# Local / editor
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+
+# Helm chart vendor copies / large trees (clone upstream instead)
+shuffle/chart/
+**/charts/**/charts/
+node_modules/
+
+# Backups
+*.bak
+*.bak-*

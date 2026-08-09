@@ -1,0 +1,133 @@
+# ------------------------------------------------------------------
+# TheHive values.yaml — StrangeBee helm chart 1.0.5 (app 5.7.5-1)
+#
+# Goal: run the ENTIRE TheHive stack (app + Cassandra + Elasticsearch +
+# MinIO) on soc-vm, so no internal traffic crosses the OpenVPN link.
+#
+# Why colocation is mandatory, not a preference:
+# every k3s node registers its OpenVPN address (10.8.0.0/24) as its node
+# IP, and soc-vm is the VPN hub, so *any* cross-node pod traffic hairpins
+# through Azure. Measured RTT: 288-509 ms to soc-vm, and 723-1060 ms
+# between two VMs sitting on the same physical LAN. JanusGraph needs
+# Cassandra to acknowledge an ID-block reservation within
+# ids.authority.wait-time (default 300 ms); reservations were taking
+# 350-650 ms, so schema creation retried forever and the app never bound
+# port 9000. That knob is GLOBAL_OFFLINE — frozen into the graph at first
+# initialisation — so it cannot be raised on an existing keyspace. The
+# fix is to remove the latency, not to raise the threshold.
+#
+# Sizing: soc-vm is 2 vCPU / 8 GB / 30 GB disk. The chart's default CPU
+# requests total 2800m, which does not fit on a 2000m node, and default
+# memory requests total 7168Mi of 7942Mi allocatable, leaving nothing for
+# the OS. Requests below are trimmed to 1200m CPU / 4608Mi memory.
+# ------------------------------------------------------------------
+
+thehive:
+  # --- REQUIRED: replace with a real random 32+ char secret ---
+  # generate one with: openssl rand -hex 32
+  httpSecret: "CHANGE_ME_OPENSSL_RAND_HEX_32"
+
+  # This is a SEPARATE value from cassandra.dbUser.password below and the
+  # chart defaults it to "", which yields an empty TH_CQL_PASSWORD and
+  # "Authentication errors encountered on all contact points" at startup.
+  # The two must always be kept in sync.
+  database:
+    username: "cassandra"
+    password: "CHANGE_ME_CASSANDRA_PASSWORD"
+
+  # -Xmn dropped: TheHive runs on G1, which sizes the young generation
+  # adaptively and warns about a fixed -Xmn.
+  jvmOpts: "-Xms1g -Xmx1g"
+
+  nodeSelector:
+    kubernetes.io/hostname: soc-vm
+
+  # 10s x 360 = 60 min budget. Only the first boot needs this, while
+  # JanusGraph creates the schema.
+  startupProbe:
+    enabled: true
+    periodSeconds: 10
+    timeoutSeconds: 1
+    failureThreshold: 360
+
+  resources:
+    limits:
+      cpu: "1000m"           # capped: 3 JVMs share only 2 vCPU
+      ephemeral-storage: "2Gi"
+      memory: "1536Mi"       # 1g heap + ~500Mi overhead headroom
+    requests:
+      cpu: "300m"
+      ephemeral-storage: "1Gi"
+      memory: "1Gi"
+
+  database:
+    password: "CHANGE_ME_CASSANDRA_PASSWORD"
+    forcePassword: true
+
+# --- Cassandra (Bitnami subchart) — colocated on soc-vm ---
+cassandra:
+  # Bitnami cassandra reads nodeSelector at the top level of the subchart.
+  nodeSelector:
+    kubernetes.io/hostname: soc-vm
+  cluster:
+    datacenter: "DC1-TheHive"
+    name: "TheHive"
+    rack: "Rack1-TheHive"
+  dbUser:
+    # REQUIRED: replace with a real password, not the chart default
+    password: "CHANGE_ME_CASSANDRA_PASSWORD"
+    forcePassword: true
+  jvm:
+    # newHeapSize dropped: HEAP_NEWSIZE only applies to the CMS collector,
+    # and Cassandra 4+ defaults to G1.
+    extraOpts: "-Xms1g -Xmx1g"
+    maxHeapSize: "1g"
+  resources:
+    limits:
+      cpu: "1000m"
+      ephemeral-storage: "2Gi"
+      memory: "2Gi"
+    requests:
+      cpu: "400m"
+      ephemeral-storage: "1Gi"
+      memory: "1536Mi"
+
+# --- Elasticsearch (Bitnami subchart) — colocated on soc-vm ---
+elasticsearch:
+  master:
+    # Only the master role is enabled (data/coordinating/ingest are
+    # replicaCount 0), so this is the one nodeSelector that matters.
+    nodeSelector:
+      kubernetes.io/hostname: soc-vm
+    # heapSize is what the chart turns into ES_JAVA_OPTS. The previous
+    # extraEnvVars entry set JVM_OPTS, which Elasticsearch never reads.
+    heapSize: "1g"
+    resources:
+      limits:
+        cpu: "1000m"
+        ephemeral-storage: "2Gi"
+        memory: "2Gi"
+      requests:
+        cpu: "400m"
+        ephemeral-storage: "1Gi"
+        memory: "1536Mi"
+
+# --- MinIO — colocated on soc-vm ---
+minio:
+  enabled: true
+  nodeSelector:
+    kubernetes.io/hostname: soc-vm
+  postJob:
+    # The bucket-creation job needs its own selector; the chart reads
+    # postJob.nodeSelector for it.
+    nodeSelector:
+      kubernetes.io/hostname: soc-vm
+  resources:
+    limits:
+      cpu: "500m"
+      ephemeral-storage: "2Gi"
+      memory: "1Gi"
+    requests:
+      cpu: "100m"
+      ephemeral-storage: "1Gi"
+      memory: "512Mi"
